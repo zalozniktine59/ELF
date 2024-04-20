@@ -23,6 +23,7 @@ elf_loader [-hlc] [OPTIONS] elf_path
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 
 // Definiramo strukturo ELFHeader, ki ustreza glavi ELF datoteke
 /*
@@ -122,6 +123,53 @@ const char *getMachineType(unsigned short machine) {
     }
 }
 
+
+
+
+Elf64_Shdr* getSectionHeaderOffset(Elf64_Ehdr *header, char *file, const char *section_name) {
+
+    // Calculate the offset of the section header string table section header
+    size_t shstrtab_header_offset = header->e_shoff + (header->e_shentsize * header->e_shstrndx);
+    // Access the section header directly from mapped memory
+    Elf64_Shdr *shstrtab_header = (Elf64_Shdr *)((char *)file + shstrtab_header_offset);
+    // 2. Read the string table
+    char *shstrtab = (char *)file + shstrtab_header->sh_offset;
+    size_t strtab_size = shstrtab_header->sh_size;
+    // Iterate over the section headers
+    for (int i = 0; i < header->e_shnum; i++) {
+        // Calculate the offset of the current section header
+        size_t section_offset = header->e_shoff + (header->e_shentsize * i);
+        
+        // Access the section header directly from mapped memory
+        Elf64_Shdr *section_header = (Elf64_Shdr *)((char *)file + section_offset);
+        
+        // Check if the section is in the .text section
+        if (strcmp(shstrtab + section_header->sh_name, section_name) == 0) {
+            //#printf("Section name: %s\n", shstrtab + section_header->sh_name);
+            //printf("Function size: %lu\n", section_header->sh_size);
+            //printf("Section offset: %lu\n", section_header->sh_offset);
+            return section_header;
+        }
+    }
+}
+void print_symtab_functions(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file) {
+    // Get the string table section associated with the symbol table
+    Elf64_Shdr *strtab_header = (Elf64_Shdr *)((char *)header + header->e_shoff + (symtab_header->sh_link * header->e_shentsize));
+    char *strtab = file + strtab_header->sh_offset;
+
+
+    // Iterate over the symbol table entries
+    Elf64_Sym *symtab = (Elf64_Sym *)(file + symtab_header->sh_offset);
+    for (int i = 0; i < symtab_header->sh_size / sizeof(Elf64_Sym); i++) {
+        // Check if the symbol is a function
+        if (ELF64_ST_TYPE(symtab[i].st_info) == STT_FUNC && symtab[i].st_size > 20) {
+            // Get the function name from the string table
+            char *func_name = strtab + symtab[i].st_name;
+            printf("%s\n", func_name);
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     
     printf("parameter: %s\n", argv[1]);
@@ -200,32 +248,11 @@ int main(int argc, char *argv[]) {
     }
     else if (strcmp(argv[1], "-l") == 0)
     {
-        // Calculate the offset of the section header string table section header
-        size_t shstrtab_header_offset = header->e_shoff + (header->e_shentsize * header->e_shstrndx);
         
-        // Access the section header directly from mapped memory
-        Elf64_Shdr *shstrtab_header = (Elf64_Shdr *)((char *)file + shstrtab_header_offset);
+        Elf64_Shdr *symtab_header  = getSectionHeaderOffset(header, file, ".symtab");
+        printf("Offset: %lu\n", symtab_header->sh_offset);
 
-        // 2. Read the string table
-        char *shstrtab = (char *)file + shstrtab_header->sh_offset;
-        size_t strtab_size = shstrtab_header->sh_size;
-
-
-        // Iterate over the section headers
-        for (int i = 0; i < header->e_shnum; i++) {
-            // Calculate the offset of the current section header
-            size_t section_offset = header->e_shoff + (header->e_shentsize * i);
-            
-            // Access the section header directly from mapped memory
-            Elf64_Shdr *section_header = (Elf64_Shdr *)((char *)file + section_offset);
-            
-            // Check if the section is in the .text section
-            if (strcmp(shstrtab + section_header->sh_name, ".text") == 0) {
-                printf("Section name: %s\n", shstrtab + section_header->sh_name);
-                //printf("Function size: %lu\n", section_header->sh_size);
-                printf("Section offset: %lu\n", section_header->sh_offset);
-            }
-        }
+        print_symtab_functions(symtab_header, header, file);
 
         /*
         size_t second_section_offset = header->e_shoff+(header->e_shentsize *2);
