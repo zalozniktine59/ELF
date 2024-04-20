@@ -162,88 +162,86 @@ int main(int argc, char *argv[]) {
     }
 
     //preberem glavo
-    Elf64_Ehdr header;
-    if (fread(&header, sizeof(header), 1, file) != 1) {
-        perror("Napaka pri branju glave datoteke");
-        close(fd);
-        return 1;
-    }
+    Elf64_Ehdr *header = (Elf64_Ehdr *)file;
 
     // Preverimo, ali je datoteka res ELF datoteka
-    if (header.e_ident[0] != 0x7f || header.e_ident[1] != 'E' || header.e_ident[2] != 'L' || header.e_ident[3] != 'F') {
+    if (header->e_ident[0] != 0x7f || header->e_ident[1] != 'E' || header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
         printf("Datoteka ni ELF datoteka\n");
-        fclose(file);
+        close(fd);
         return 1;
     }
     if (strcmp(argv[1], "-h") == 0)
     {
         printf("Magic: ");
         for (int i = 0; i < 16; i++) {
-            printf("%02x ", header.e_ident[i]);
+            printf("%02x ", header->e_ident[i]);
         }
         printf("\n");
-        printf("Class: %s\n", getElfClass(header.e_ident[4]));
-        printf("Data: %s\n", getDataEncoding(header.e_ident[5]));
-        printf("Version: %d (current)\n", header.e_version);
-        printf("OS/ABI: %s\n", getOSABI(header.e_ident[7]));
-        printf("ABI Version: %d\n", header.e_ident[8]);
-        printf("Type: %s\n", getElfType(header.e_type));
-        printf("Machine: %s\n", getMachineType(header.e_machine));
-        printf("Version: 0x%x\n", header.e_version);
-        printf("Entry point address: 0x%lx\n", header.e_entry);
-        printf("Start of program headers: %lu (bytes into file)\n", header.e_phoff);
-        printf("Start of section headers: %lu (bytes into file)\n", header.e_shoff);
-        printf("Flags: 0x%x\n", header.e_flags);
-        printf("Size of this header: %d (bytes)\n", header.e_ehsize);
-        printf("Size of program headers: %d (bytes)\n", header.e_phentsize);
-        printf("Number of program headers: %d\n", header.e_phnum);
-        printf("Size of section headers: %d (bytes)\n", header.e_shentsize);
-        printf("Number of section headers: %d\n", header.e_shnum);
-        printf("Section header string table index: %d\n", header.e_shstrndx);
-        fclose(file);
+        printf("Class: %s\n", getElfClass(header->e_ident[4]));
+        printf("Data: %s\n", getDataEncoding(header->e_ident[5]));
+        printf("Version: %d (current)\n", header->e_version);
+        printf("OS/ABI: %s\n", getOSABI(header->e_ident[7]));
+        printf("ABI Version: %d\n", header->e_ident[8]);
+        printf("Type: %s\n", getElfType(header->e_type));
+        printf("Machine: %s\n", getMachineType(header->e_machine));
+        printf("Version: 0x%x\n", header->e_version);
+        printf("Entry point address: 0x%lx\n", header->e_entry);
+        printf("Start of program headers: %lu (bytes into file)\n", header->e_phoff);
+        printf("Start of section headers: %lu (bytes into file)\n", header->e_shoff);
+        printf("Flags: 0x%x\n", header->e_flags);
+        printf("Size of this header: %d (bytes)\n", header->e_ehsize);
+        printf("Size of program headers: %d (bytes)\n", header->e_phentsize);
+        printf("Number of program headers: %d\n", header->e_phnum);
+        printf("Size of section headers: %d (bytes)\n", header->e_shentsize);
+        printf("Number of section headers: %d\n", header->e_shnum);
+        printf("Section header string table index: %d\n", header->e_shstrndx);
+        close(fd);
 
     }
     else if (strcmp(argv[1], "-l") == 0)
     {
-        // 1. Locate the section header string table section
-        Elf64_Shdr shstrtab_header;
-        fseek(file, header.e_shoff + (header.e_shentsize * header.e_shstrndx), SEEK_SET);
-        fread(&shstrtab_header, sizeof(shstrtab_header), 1, file);
+        // Calculate the offset of the section header string table section header
+        size_t shstrtab_header_offset = header->e_shoff + (header->e_shentsize * header->e_shstrndx);
+        
+        // Access the section header directly from mapped memory
+        Elf64_Shdr *shstrtab_header = (Elf64_Shdr *)((char *)file + shstrtab_header_offset);
 
         // 2. Read the string table
-        char* strtab = malloc(shstrtab_header.sh_size);
-        fseek(file, shstrtab_header.sh_offset, SEEK_SET);
-        fread(strtab, shstrtab_header.sh_size, 1, file);
-        size_t strtab_size = shstrtab_header.sh_size;
+        char *shstrtab = (char *)file + shstrtab_header->sh_offset;
+        size_t strtab_size = shstrtab_header->sh_size;
 
+
+        // Iterate over the section headers
+        for (int i = 0; i < header->e_shnum; i++) {
+            // Calculate the offset of the current section header
+            size_t section_offset = header->e_shoff + (header->e_shentsize * i);
+            
+            // Access the section header directly from mapped memory
+            Elf64_Shdr *section_header = (Elf64_Shdr *)((char *)file + section_offset);
+            
+            // Check if the section is in the .text section
+            if (strcmp(shstrtab + section_header->sh_name, ".text") == 0) {
+                printf("Section name: %s\n", shstrtab + section_header->sh_name);
+                //printf("Function size: %lu\n", section_header->sh_size);
+                printf("Section offset: %lu\n", section_header->sh_offset);
+            }
+        }
+
+        /*
+        size_t second_section_offset = header->e_shoff+(header->e_shentsize *2);
+        // Access the second section header directly from mapped memory
+        Elf64_Shdr *second_section = (Elf64_Shdr *)((char *)file + second_section_offset);
+
+        printf("Size of second section : %lu\n", second_section->sh_size);
+        printf("Name of second section : %u\n", second_section->sh_name);
         
-        //unsigned long first_section_offset = header.e_shoff+header.e_shentsize;
-        unsigned long second_section_offset = header.e_shoff+(header.e_shentsize *8);
-        //printf("Before fseek: Offset value: %lu\n", first_section_offset);
-        //drugi section
-        if (fseek(file, second_section_offset, SEEK_SET) != 0) {
-            perror("Error seeking to the beginning of the second section");
-            fclose(file);
-            return 1;
-        }
-
-        Elf64_Shdr second_section;
-        if (fread(&second_section, sizeof(second_section), 1, file) != 1) {
-            perror("Error reading the header of the second section");
-            fclose(file);
-            return 1;
-        }
-        printf("Size of second section : %lu\n", second_section.sh_size);
-        printf("Name of second section : %u\n", second_section.sh_name);
-
-        if (second_section.sh_name < strtab_size) {
-            const char* section_name = strtab + second_section.sh_name;
+        if (second_section->sh_name < strtab_size) {
+            const char* section_name = shstrtab + second_section->sh_name;
             printf("Name of second section : %s\n", section_name);
         } else {
             printf("Invalid section name index.\n");
         }
-
-
+        */
     }
 
     else if (param == "-c")
