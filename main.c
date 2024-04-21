@@ -124,9 +124,34 @@ const char *getMachineType(unsigned short machine) {
 }
 
 
+size_t getSectionHeaderIndex(Elf64_Ehdr *header, char *file, const char *section_name) {
+    // Calculate the offset of the section header string table section header
+    size_t shstrtab_header_offset = header->e_shoff + (header->e_shentsize * header->e_shstrndx);
+    // Access the section header directly from mapped memory
+    Elf64_Shdr *shstrtab_header = (Elf64_Shdr *)((char *)file + shstrtab_header_offset);
+    // 2. Read the string table
+    char *shstrtab = (char *)file + shstrtab_header->sh_offset;
+    size_t strtab_size = shstrtab_header->sh_size;
+    // Iterate over the section headers
+    for (int i = 0; i < header->e_shnum; i++) {
+        // Calculate the offset of the current section header
+        size_t section_offset = header->e_shoff + (header->e_shentsize * i);
+        
+        // Access the section header directly from mapped memory
+        Elf64_Shdr *section_header = (Elf64_Shdr *)((char *)file + section_offset);
+        
+        // Check if the section is in the .text section
+        if (strcmp(shstrtab + section_header->sh_name, section_name) == 0) {
+            //#printf("Section name: %s\n", shstrtab + section_header->sh_name);
+            //printf("Function size: %lu\n", section_header->sh_size);
+            //printf("Section offset: %lu\n", section_header->sh_offset);
+            //printf("Section header index: %d\n", i);
+            return i;
+        }
+    }
+}
 
-
-Elf64_Shdr* getSectionHeaderOffset(Elf64_Ehdr *header, char *file, const char *section_name) {
+Elf64_Shdr* getSectionHeader(Elf64_Ehdr *header, char *file, const char *section_name) {
 
     // Calculate the offset of the section header string table section header
     size_t shstrtab_header_offset = header->e_shoff + (header->e_shentsize * header->e_shstrndx);
@@ -169,6 +194,56 @@ void print_symtab_functions(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char 
         }
     }
 }
+void print_symtab_variables(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file, int fd) {
+    // Get the string table section associated with the symbol table
+    Elf64_Shdr *strtab_header = (Elf64_Shdr *)((char *)header + header->e_shoff + (symtab_header->sh_link * header->e_shentsize));
+    char *strtab = file + strtab_header->sh_offset;
+
+    // Iterate over the symbol table entries
+    Elf64_Sym *symtab = (Elf64_Sym *)(file + symtab_header->sh_offset);
+    // ... (Get string table and section headers as before) ...
+
+    for (int i = 0; i < symtab_header->sh_size / sizeof(Elf64_Sym); i++) {
+        if (ELF64_ST_TYPE(symtab[i].st_info) == STT_OBJECT && 
+            symtab[i].st_shndx != SHN_UNDEF && 
+            symtab[i].st_shndx != SHN_ABS &&
+            symtab[i].st_shndx == getSectionHeaderIndex(header,file,".data") &&
+            ELF64_ST_VISIBILITY(symtab[i].st_other) == STV_DEFAULT) {  // Check if in .data section 
+
+            // Get the data section header
+            Elf64_Shdr *data_section_header = getSectionHeader(header, file, ".data");
+
+            // Calculate the offset of the variable from the start of the .data section
+            Elf64_Off variable_offset = symtab[i].st_value - data_section_header->sh_addr;
+            //printf("Variable offset: %lu\n", variable_offset);
+
+            // Get the variable's value
+            int *variable_ptr = (int *)(file + data_section_header->sh_offset + variable_offset);
+            int variable_value = *variable_ptr;
+
+            char *var_name = strtab + symtab[i].st_name;
+
+            printf("Variable name: %s, value: %d\n", var_name, variable_value);
+
+            int changed_value = 22;
+
+            // Seek to the location of the variable within the .data section
+            int seek_result = lseek(fd, data_section_header->sh_offset + variable_offset, SEEK_SET);
+
+            size_t write_count = write(fd, &changed_value, sizeof(int));
+            if (write_count != sizeof(int)) {
+                perror("write");
+            }
+
+            
+            
+            
+        }   
+    }
+}
+
+
+
 
 int main(int argc, char *argv[]) {
     
@@ -178,15 +253,7 @@ int main(int argc, char *argv[]) {
     char *param = argv[1];
     char *elf_path = argv[2];
 
-    /*
-    //odpremo datoteko v binarnem načinu
-    FILE *file = fopen(argv[2], "rb");
-    if (file == NULL) {
-        perror("Napaka pri odpiranju datoteke");
-        return 1;
-    }
-    */
-   // Open the file
+    // Open the file
     int fd = open(argv[2], O_RDWR);
     if (fd == -1) {
         perror("open");
@@ -249,30 +316,17 @@ int main(int argc, char *argv[]) {
     else if (strcmp(argv[1], "-l") == 0)
     {
         
-        Elf64_Shdr *symtab_header  = getSectionHeaderOffset(header, file, ".symtab");
+        Elf64_Shdr *symtab_header  = getSectionHeader(header, file, ".symtab");
         printf("Offset: %lu\n", symtab_header->sh_offset);
 
-        print_symtab_functions(symtab_header, header, file);
+        //print_symtab_functions(symtab_header, header, file);
+        print_symtab_variables(symtab_header, header, file, fd);
 
-        /*
-        size_t second_section_offset = header->e_shoff+(header->e_shentsize *2);
-        // Access the second section header directly from mapped memory
-        Elf64_Shdr *second_section = (Elf64_Shdr *)((char *)file + second_section_offset);
-
-        printf("Size of second section : %lu\n", second_section->sh_size);
-        printf("Name of second section : %u\n", second_section->sh_name);
-        
-        if (second_section->sh_name < strtab_size) {
-            const char* section_name = shstrtab + second_section->sh_name;
-            printf("Name of second section : %s\n", section_name);
-        } else {
-            printf("Invalid section name index.\n");
-        }
-        */
     }
 
-    else if (param == "-c")
+    else if (strcmp(argv[1], "-c") == 0)
     {
+
         /* code */
     }
     
