@@ -194,7 +194,7 @@ void print_symtab_functions(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char 
         }
     }
 }
-void print_symtab_variables(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file, int fd) {
+void print_symtab_variables(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file, int fd, char* variables[], int variables_size) {
     // Get the string table section associated with the symbol table
     Elf64_Shdr *strtab_header = (Elf64_Shdr *)((char *)header + header->e_shoff + (symtab_header->sh_link * header->e_shentsize));
     char *strtab = file + strtab_header->sh_offset;
@@ -207,37 +207,44 @@ void print_symtab_variables(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char 
         if (ELF64_ST_TYPE(symtab[i].st_info) == STT_OBJECT && 
             symtab[i].st_shndx != SHN_UNDEF && 
             symtab[i].st_shndx != SHN_ABS &&
-            symtab[i].st_shndx == getSectionHeaderIndex(header,file,".data") &&
-            ELF64_ST_VISIBILITY(symtab[i].st_other) == STV_DEFAULT) {  // Check if in .data section 
+            symtab[i].st_shndx == getSectionHeaderIndex(header,file,".data") && // Check if in .data section
+            ELF64_ST_VISIBILITY(symtab[i].st_other) == STV_DEFAULT){  
 
             // Get the data section header
             Elf64_Shdr *data_section_header = getSectionHeader(header, file, ".data");
-
-            // Calculate the offset of the variable from the start of the .data section
-            Elf64_Off variable_offset = symtab[i].st_value - data_section_header->sh_addr;
-            //printf("Variable offset: %lu\n", variable_offset);
-
-            // Get the variable's value
-            int *variable_ptr = (int *)(file + data_section_header->sh_offset + variable_offset);
-            int variable_value = *variable_ptr;
-
             char *var_name = strtab + symtab[i].st_name;
-
-            printf("Variable name: %s, value: %d\n", var_name, variable_value);
-
-            int changed_value = 22;
-
-            // Seek to the location of the variable within the .data section
-            int seek_result = lseek(fd, data_section_header->sh_offset + variable_offset, SEEK_SET);
-
-            size_t write_count = write(fd, &changed_value, sizeof(int));
-            if (write_count != sizeof(int)) {
-                perror("write");
+            // Check if the variable name is in the array of variables
+            int found = 0;
+            for (int j = 0; j < variables_size; j++) {
+                if (strcmp(var_name, variables[j]) == 0) {
+                    found = 1;
+                    break;
+                }
             }
+            // If the variable name is in the array, change its value
+            if (found) {
+                // Calculate the offset of the variable from the start of the .data section
+                Elf64_Off variable_offset = symtab[i].st_value - data_section_header->sh_addr;
+                //printf("Variable offset: %lu\n", variable_offset);
 
-            
-            
-            
+                // Get the variable's value
+                int *variable_ptr = (int *)(file + data_section_header->sh_offset + variable_offset);
+                int variable_value = *variable_ptr;
+
+                char *var_name = strtab + symtab[i].st_name;
+
+                printf("Variable name: %s, value: %d\n", var_name, variable_value);
+
+                int changed_value = variable_value + 2;
+
+                // Seek to the location of the variable within the .data section
+                int seek_result = lseek(fd, data_section_header->sh_offset + variable_offset, SEEK_SET);
+
+                size_t write_count = write(fd, &changed_value, sizeof(int));
+                if (write_count != sizeof(int)) {
+                    perror("write");
+                }
+            }
         }   
     }
 }
@@ -247,8 +254,17 @@ void print_symtab_variables(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char 
 
 int main(int argc, char *argv[]) {
     
+    printf("Neki: %s\n", argv[0]);
     printf("parameter: %s\n", argv[1]);
     printf("elf path: %s\n", argv[2]);
+    printf("argc: %d\n", argc);
+
+    int number_of_variables = argc - 3;
+
+    char *variables[number_of_variables];
+    for (int i = 0; i < number_of_variables; i++) {
+        variables[i] = argv[i + 3];
+    }
 
     char *param = argv[1];
     char *elf_path = argv[2];
@@ -320,14 +336,14 @@ int main(int argc, char *argv[]) {
         printf("Offset: %lu\n", symtab_header->sh_offset);
 
         //print_symtab_functions(symtab_header, header, file);
-        print_symtab_variables(symtab_header, header, file, fd);
+        
 
     }
 
     else if (strcmp(argv[1], "-c") == 0)
     {
-
-        /* code */
+        Elf64_Shdr *symtab_header  = getSectionHeader(header, file, ".symtab");
+        print_symtab_variables(symtab_header, header, file, fd, variables, number_of_variables);
     }
     
     // Unmap the file
