@@ -9,7 +9,7 @@ run:
 	./elf_changer -h hello
 
 clean:
-	rm -f elf_changer build_hello
+	rm -f elf_changer hello
 
 build_elf_changer:
 	$(CC) $(CFLAGS) -o elf_changer main.c

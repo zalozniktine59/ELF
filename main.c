@@ -208,38 +208,41 @@ void elf_27286_simboli(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file
     // Nastavim pointer na zacetek string tabele od tabele simbolov
     char *strtab = file + strtab_header->sh_offset;
 
-
-    // Iterate over the symbol table entries
+    // iteriram cez vse vnose v simbolni tabeli
     Elf64_Sym *symtab = (Elf64_Sym *)(file + symtab_header->sh_offset);
+    // grem cez vse simbole
     for (long unsigned int i = 0; i < symtab_header->sh_size / sizeof(Elf64_Sym); i++) {
-        // Check if the symbol is a function
+        // prevemim ce je tip simbola funkcija in ce je velikost vecja od 20
         if (ELF64_ST_TYPE(symtab[i].st_info) == STT_FUNC && symtab[i].st_size > 20) {
-            // Get the function name from the string table
+            // dobim ime funkcije
             char *func_name = strtab + symtab[i].st_name;
-            printf("%s\n", func_name);
+            // dobim velikost funkcije
+            int func_size = symtab[i].st_size;
+            printf("%s, velikosti: %i B\n", func_name, func_size);
         }
     }
 }
 void elf_27286_menjaj(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file, int fd, char* variables[], int variables_size) {
-    // Get the string table section associated with the symbol table
+    // Dobim string table od simbolov
     Elf64_Shdr *strtab_header = (Elf64_Shdr *)((char *)header + header->e_shoff + (symtab_header->sh_link * header->e_shentsize));
     char *strtab = file + strtab_header->sh_offset;
 
-    // Iterate over the symbol table entries
+    // Iteriram cez vse vnose v simbolni tabeli
     Elf64_Sym *symtab = (Elf64_Sym *)(file + symtab_header->sh_offset);
-    // ... (Get string table and section headers as before) ...
-
+    // Grem cez vse simbole
     for (long unsigned int i = 0; i < symtab_header->sh_size / sizeof(Elf64_Sym); i++) {
+        // Preverim ce je tip simbola objekt in ce ni undefined in ce ni absoluten
         if (ELF64_ST_TYPE(symtab[i].st_info) == STT_OBJECT && 
             symtab[i].st_shndx != SHN_UNDEF && 
             symtab[i].st_shndx != SHN_ABS &&
-            symtab[i].st_shndx == getSectionHeaderIndex(header,file,".data") && // Check if in .data section
-            ELF64_ST_VISIBILITY(symtab[i].st_other) == STV_DEFAULT){  
+            symtab[i].st_shndx == getSectionHeaderIndex(header,file,".data") && // preverim ce je v .data sectionu
+            ELF64_ST_VISIBILITY(symtab[i].st_other) == STV_DEFAULT) // preverim ce je simbol globalen (default)
+            {  
 
-            // Get the data section header
+            // Dobim section header od .data sectiona
             Elf64_Shdr *data_section_header = getSectionHeader(header, file, ".data");
             char *var_name = strtab + symtab[i].st_name;
-            // Check if the variable name is in the array of variables
+            // Preverim ce je ime spremenljivke v arrayu imen spremenljivk
             int found = 0;
             for (int j = 0; j < variables_size; j++) {
                 if (strcmp(var_name, variables[j]) == 0) {
@@ -247,24 +250,24 @@ void elf_27286_menjaj(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file,
                     break;
                 }
             }
-            // If the variable name is in the array, change its value
+            // Je v arrayu imen spremenljivk
             if (found) {
-                // Calculate the offset of the variable from the start of the .data section
+                // zracunam offset od zacetka .data sectiona
+                // - je zato ker računam offset od začetka sectiona
                 Elf64_Off variable_offset = symtab[i].st_value - data_section_header->sh_addr;
 
-                // Get the variable's value
+                // Dobim vrednost spremenljivke
                 int *variable_ptr = (int *)(file + data_section_header->sh_offset + variable_offset);
                 int variable_value = *variable_ptr;
-
+                // Dobim ime spremenljivke
                 char *var_name = strtab + symtab[i].st_name;
-
-                //printf("Variable name: %s, value: %d\n", var_name, variable_value);
 
                 int changed_value = variable_value + 2;
 
-                // Seek to the location of the variable within the .data section
+                // Premaknem se na lokacijo spremenljivke v .data sectionu
                 lseek(fd, data_section_header->sh_offset + variable_offset, SEEK_SET);
 
+                // Zapišem novo vrednost spremenljivke
                 size_t write_count = write(fd, &changed_value, sizeof(int));
                 if (write_count != sizeof(int)) {
                     perror("write");
@@ -276,8 +279,6 @@ void elf_27286_menjaj(Elf64_Shdr *symtab_header, Elf64_Ehdr *header, char *file,
 }
 
 
-
-
 int main(int argc, char *argv[]) {
     int number_of_variables = argc - 3;
 
@@ -285,14 +286,14 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < number_of_variables; i++) {
         variables[i] = argv[i + 3];
     }
-    // Open the file
+    // Odprem datoteko
     int fd = open(argv[2], O_RDWR);
     if (fd == -1) {
         perror("open");
         return 1;
     }
 
-    // Get file size
+    // Dobim velikost
     struct stat sb;
     if (fstat(fd, &sb) == -1) {
         perror("fstat");
@@ -300,17 +301,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Map the file into memory
+    // Shranim vsebino datoteke v ram
     char *file = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (file == MAP_FAILED) {
         perror("mmap");
         close(fd);
         return 1;
     }
-
     //preberem glavo
     Elf64_Ehdr *header = (Elf64_Ehdr *)file;
-    // Get the section header string table section header
+    // dobim section header string tabele
     Elf64_Shdr *symtab_header  = getSectionHeader(header, file, ".symtab");
 
     // Preverimo, ali je datoteka res ELF datoteka
@@ -333,13 +333,12 @@ int main(int argc, char *argv[]) {
         elf_27286_menjaj(symtab_header, header, file, fd, variables, number_of_variables);
     }
     
-    // Unmap the file
+    // Unmap
     if (munmap(file, sb.st_size) == -1) {
         perror("munmap");
         close(fd);
         return 1;
     }
-    // Close the file
     close(fd);
 
     return 0;
